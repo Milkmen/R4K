@@ -1,4 +1,4 @@
-module mips_core
+module r4k_core
 (
     input  wire clk,
     input  wire reset,
@@ -140,19 +140,19 @@ module mips_core
                     write_index = rd;
                 end
 
-            6'b000010: // SRLV rd, rt, rs
+            6'b000110: // SRLV rd, rt, rs
                 begin
                     write_value = rt_value >> rs_value[4:0];
                     write_index = rd;
                 end
 
-            6'b000010: // SRA rd, rt, sa
+            6'b000011: // SRA rd, rt, sa
                 begin
                     write_value = $signed(rt_value) >> sa;
                     write_index = rd;
                 end
 
-            6'b000010: // SRAV rd, rt, rs
+            6'b000111: // SRAV rd, rt, rs
                 begin
                     write_value = $signed(rt_value) >> rs_value[4:0];
                     write_index = rd;
@@ -176,6 +176,28 @@ module mips_core
                         write_value = 64'h0;
 
                     write_index = rd;
+                end
+
+            6'b010001: // MFHI rs
+                begin
+                    write_value = hi;
+                    write_index = rd;
+                end
+
+            6'b010011: // MFLO rs
+                begin
+                    write_value = lo;
+                    write_index = rd;
+                end
+
+            6'b010001: // MTHI rs
+                begin
+                    hi = rs_value;
+                end
+
+            6'b010011: // MTLO rs
+                begin
+                    lo = rs_value;
                 end
 
             6'b001000: // JR rs
