@@ -16,287 +16,58 @@ module r4k_core
 );
     localparam START_ADDR = 64'h0;
 
+    // Register file and special registers
     reg [63:0] registers [31:0];
     reg [63:0] hi;
     reg [63:0] lo;
 
+    // Program counter and branch control
     reg [63:0] prog_counter;
     reg [63:0] branch_counter;
     reg branch_enable;
-    reg [31:0] instruction;
 
-    wire [5:0]  opcode  = instruction[31:26];
-    wire [4:0]  rs      = instruction[25:21];
-    wire [4:0]  rt      = instruction[20:16];
-    wire [4:0]  rd      = instruction[15:11];
-    wire [4:0]  sa      = instruction[10:6];
-    wire [5:0]  funct   = instruction[5:0];
-    wire [25:0] addr    = instruction[25:0];
-    wire [15:0] offset  = instruction[15:0];
+    // Pipeline registers
+    // IF/ID
+    reg [63:0] ifid_pc;
+    reg [31:0] ifid_instr;
 
-    wire [63:0] imm_se = { { 48 { offset[15] } }, offset };
-    wire [63:0] imm_ze = { 48'd0, offset} ; 
+    // ID/EX
+    reg [63:0] idex_pc;
+    reg [4:0]  idex_rs;
+    reg [4:0]  idex_rt;
+    reg [4:0]  idex_rd;
+    reg [63:0] idex_rs_value;
+    reg [63:0] idex_rt_value;
+    reg [63:0] idex_rd_value;
+    reg [63:0] idex_imm_se;
+    reg [63:0] idex_imm_ze;
+    reg [5:0]  idex_opcode;
+    reg [5:0]  idex_funct;
 
-    reg [63:0] rs_value;
-    reg [63:0] rt_value;
-    reg [63:0] rd_value;
-    reg [63:0] write_value;
-    reg [4:0]  write_index;
+    // EX/MEM
+    reg [63:0] exmem_alu_result;
+    reg [63:0] exmem_write_value;
+    reg [4:0]  exmem_write_index;
 
-    // Instruction Decode
-    always @(*)
-    begin
-        write_value = 64'd0;
-        write_index = 5'd0;
+    // MEM/WB
+    reg [63:0] memwb_write_value;
+    reg [4:0]  memwb_write_index;
 
-        case(opcode)
-        6'b000000:
-            case(funct)
-            6'b100000: // ADD rd, rs, rt
-                begin 
-                    write_value = $signed(rs_value) + $signed(rt_value);
-                    write_index = rd;
-                end
-
-            6'b100001: // ADDU rd, rs, rt
-                begin 
-                    write_value = rs_value + rt_value;
-                    write_index = rd;
-                end
-
-            6'b100010: // SUB rd, rs, rt
-                begin 
-                    write_value = $signed(rs_value) - $signed(rt_value);
-                    write_index = rd;
-                end
-
-            6'b100011: // SUBU rd, rs, rt
-                begin 
-                    write_value = rs_value - rt_value;
-                    write_index = rd;
-                end
-                
-            6'b011000: // MULT rs, rt
-                begin 
-                    {hi, lo} = $signed(rs_value) * $signed(rt_value);
-                end
-
-            6'b011001: // MULTU rs, rt
-                begin 
-                    {hi, lo} = rs_value * rt_value;
-                end
-
-            6'b011010: // DIV rs, rt
-                begin
-                    lo = $signed(rs_value) / $signed(rt_value);
-                    hi = $signed(rs_value) % $signed(rt_value);
-                end
-
-            6'b011011: // DIVU rs, rt
-                begin 
-                    lo = rs_value / rt_value;
-                    hi = rs_value % rt_value;
-                end
-
-            6'b100100: // AND rd, rs, rt
-                begin 
-                    write_value = rs_value & rt_value;
-                    write_index = rd;
-                end
-
-            6'b100101: // OR rd, rs, rt
-                begin 
-                    write_value = rs_value | rt_value;
-                    write_index = rd;
-                end
-
-            6'b100110: // XOR rd, rs, rt
-                begin 
-                    write_value = rs_value ^ rt_value;
-                    write_index = rd;
-                end
-
-            6'b100111: // NOR rd, rs, rt
-                begin 
-                    write_value = ~(rs_value | rt_value);
-                    write_index = rd;
-                end
-
-            6'b000000: // SLL rd, rt, sa
-                begin
-                    write_value = rt_value << sa;
-                    write_index = rd;
-                end
-
-            6'b000100: // SLLV rd, rt, rs
-                begin
-                    write_value = rt_value << rs_value[4:0];
-                    write_index = rd;
-                end
-
-            6'b000010: // SRL rd, rt, sa
-                begin
-                    write_value = rt_value >> sa;
-                    write_index = rd;
-                end
-
-            6'b000110: // SRLV rd, rt, rs
-                begin
-                    write_value = rt_value >> rs_value[4:0];
-                    write_index = rd;
-                end
-
-            6'b000011: // SRA rd, rt, sa
-                begin
-                    write_value = $signed(rt_value) >> sa;
-                    write_index = rd;
-                end
-
-            6'b000111: // SRAV rd, rt, rs
-                begin
-                    write_value = $signed(rt_value) >> rs_value[4:0];
-                    write_index = rd;
-                end
-
-            6'b101010: // SLT rd, rs, rt
-                begin
-                    if($signed(rs_value) < $signed(rt_value))
-                        write_value = 64'h1;
-                    else
-                        write_value = 64'h0;
-
-                    write_index = rd;
-                end
-
-            6'b101011: // SLTU rd, rs, rt
-                begin
-                    if(rs_value < rt_value)
-                        write_value = 64'h1;
-                    else
-                        write_value = 64'h0;
-
-                    write_index = rd;
-                end
-
-            6'b010001: // MFHI rs
-                begin
-                    write_value = hi;
-                    write_index = rd;
-                end
-
-            6'b010011: // MFLO rs
-                begin
-                    write_value = lo;
-                    write_index = rd;
-                end
-
-            6'b010001: // MTHI rs
-                begin
-                    hi = rs_value;
-                end
-
-            6'b010011: // MTLO rs
-                begin
-                    lo = rs_value;
-                end
-
-            6'b001000: // JR rs
-                begin
-                    branch_counter = rs_value;
-                    branch_enable = 1'b1;
-                end
-
-            6'b001001: // JALR rd, rs
-                begin
-                    write_value = prog_counter + 64'h4;
-                    write_index = rd;
-
-                    branch_counter = rs_value;
-                    branch_enable = 1'b1;
-                end
-
-            endcase
-
-        6'b001000: // ADDI rt, rs, immediate
-            begin
-                write_value = $signed(rs_value) + $signed(imm_se);
-                write_index = rt;
-            end
-
-        6'b001001: // ADDIU rt, rs, immediate
-            begin
-                write_value = rs_value + imm_se;
-                write_index = rt;
-            end
-
-        6'b001100: // ANDI rt, rs, immediate
-            begin
-                write_value = rs_value & imm_ze;
-                write_index = rt;
-            end
-
-        6'b101000: // ORI rt, rs, immediate
-            begin
-                write_value = rs_value | imm_ze;
-                write_index = rt;
-            end
-
-        6'b001110: // XORI rt, rs, immediate
-            begin
-                write_value = rs_value ^ imm_ze;
-                write_index = rt;
-            end
-
-        6'b001111: // LUI rt, immediate
-            begin
-                write_value = { imm_ze[15:0], 48'd0 };
-                write_index = rt;
-            end
-
-        6'b001010: // SLTI rt, rs, immediate
-            begin
-                if($signed(rs_value) < $signed(imm_se))
-                    write_value = 64'h1;
-                else
-                    write_value = 64'h0;
-
-                write_index = rt;
-            end
-
-        6'b001011: // SLTIU rt, rs, immediate
-            begin
-                if(rs_value < imm_se)
-                    write_value = 64'h1;
-                else
-                    write_value = 64'h0;
-
-                write_index = rt;
-            end
-
-        6'b000010: // J target
-            begin
-                branch_counter = {prog_counter[63:28], addr, 2'b00};
-                branch_enable = 1'b1;
-            end
-
-        6'b000011: // JAL target
-            begin
-                write_value = prog_counter + 64'h4;
-                write_index = 31;
-
-                branch_counter = {prog_counter[63:28], addr, 2'b00};
-                branch_enable = 1'b1;
-            end
-        
-        endcase
-    end
-
-    // Clocked logic
+    // IF stage
     always @(posedge clk or posedge reset)
     begin
-        if(!reset)
+        if(reset)
         begin
-            // Continue Execution
+            prog_counter <= START_ADDR;
+            branch_enable <= 1'b0;
+            ifid_pc <= 64'd0;
+            ifid_instr <= 32'd0;
+        end
+        else
+        begin
+            ifid_pc <= prog_counter;
+            ifid_instr <= instr_in;
+
             if(!branch_enable)
             begin
                 prog_counter <= prog_counter + 64'h4;
@@ -306,22 +77,244 @@ module r4k_core
                 prog_counter <= branch_counter;
                 branch_enable <= 1'b0;
             end
-
-            instruction <= instr_in;
-
-            rs_value <= registers[rs];
-            rt_value <= registers[rt];
-            rd_value <= registers[rd];
-
-            if (write_index != 5'd0)
-                registers[write_index] <= write_value;
         end
-        else
-        begin
-            // Reset
-            prog_counter <= START_ADDR;
-            branch_enable <= 1'b0;
-        end
+    end
+
+    // ID stage
+    always @(posedge clk)
+    begin
+        idex_pc <= ifid_pc;
+        idex_opcode <= ifid_instr[31:26];
+        idex_rs <= ifid_instr[25:21];
+        idex_rt <= ifid_instr[20:16];
+        idex_rd <= ifid_instr[15:11];
+        idex_funct <= ifid_instr[5:0];
+        idex_imm_se <= { {48{ifid_instr[15]}}, ifid_instr[15:0] };
+        idex_imm_ze <= { 48'd0, ifid_instr[15:0] };
+        idex_rs_value <= registers[ifid_instr[25:21]];
+        idex_rt_value <= registers[ifid_instr[20:16]];
+        idex_rd_value <= registers[ifid_instr[15:11]];
+    end
+
+    // EX stage
+    always @(*)
+    begin
+        exmem_write_value = 64'd0;
+        exmem_write_index = 5'd0;
+        exmem_alu_result = 64'd0;
+
+        case(idex_opcode)
+        6'b000000:
+            case(idex_funct)
+            6'b100000: // ADD rd, rs, rt
+                begin 
+                    exmem_write_value = $signed(idex_rs_value) + $signed(idex_rt_value);
+                    exmem_write_index = idex_rd;
+                end
+            6'b100001: // ADDU rd, rs, rt
+                begin 
+                    exmem_write_value = idex_rs_value + idex_rt_value;
+                    exmem_write_index = idex_rd;
+                end
+            6'b100010: // SUB rd, rs, rt
+                begin 
+                    exmem_write_value = $signed(idex_rs_value) - $signed(idex_rt_value);
+                    exmem_write_index = idex_rd;
+                end
+            6'b100011: // SUBU rd, rs, rt
+                begin 
+                    exmem_write_value = idex_rs_value - idex_rt_value;
+                    exmem_write_index = idex_rd;
+                end
+            6'b011000: // MULT rs, rt
+                begin 
+                    {hi, lo} = $signed(idex_rs_value) * $signed(idex_rt_value);
+                end
+            6'b011001: // MULTU rs, rt
+                begin 
+                    {hi, lo} = idex_rs_value * idex_rt_value;
+                end
+            6'b011010: // DIV rs, rt
+                begin
+                    lo = $signed(idex_rs_value) / $signed(idex_rt_value);
+                    hi = $signed(idex_rs_value) % $signed(idex_rt_value);
+                end
+            6'b011011: // DIVU rs, rt
+                begin 
+                    lo = idex_rs_value / idex_rt_value;
+                    hi = idex_rs_value % idex_rt_value;
+                end
+            6'b100100: // AND rd, rs, rt
+                begin 
+                    exmem_write_value = idex_rs_value & idex_rt_value;
+                    exmem_write_index = idex_rd;
+                end
+            6'b100101: // OR rd, rs, rt
+                begin 
+                    exmem_write_value = idex_rs_value | idex_rt_value;
+                    exmem_write_index = idex_rd;
+                end
+            6'b100110: // XOR rd, rs, rt
+                begin 
+                    exmem_write_value = idex_rs_value ^ idex_rt_value;
+                    exmem_write_index = idex_rd;
+                end
+            6'b100111: // NOR rd, rs, rt
+                begin 
+                    exmem_write_value = ~(idex_rs_value | idex_rt_value);
+                    exmem_write_index = idex_rd;
+                end
+            6'b000000: // SLL rd, rt, sa
+                begin
+                    exmem_write_value = idex_rt_value << idex_pc[10:6];
+                    exmem_write_index = idex_rd;
+                end
+            6'b000100: // SLLV rd, rt, rs
+                begin
+                    exmem_write_value = idex_rt_value << idex_rs_value[4:0];
+                    exmem_write_index = idex_rd;
+                end
+            6'b000010: // SRL rd, rt, sa
+                begin
+                    exmem_write_value = idex_rt_value >> idex_pc[10:6];
+                    exmem_write_index = idex_rd;
+                end
+            6'b000110: // SRLV rd, rt, rs
+                begin
+                    exmem_write_value = idex_rt_value >> idex_rs_value[4:0];
+                    exmem_write_index = idex_rd;
+                end
+            6'b000011: // SRA rd, rt, sa
+                begin
+                    exmem_write_value = $signed(idex_rt_value) >> idex_pc[10:6];
+                    exmem_write_index = idex_rd;
+                end
+            6'b000111: // SRAV rd, rt, rs
+                begin
+                    exmem_write_value = $signed(idex_rt_value) >> idex_rs_value[4:0];
+                    exmem_write_index = idex_rd;
+                end
+            6'b101010: // SLT rd, rs, rt
+                begin
+                    if($signed(idex_rs_value) < $signed(idex_rt_value))
+                        exmem_write_value = 64'h1;
+                    else
+                        exmem_write_value = 64'h0;
+                    exmem_write_index = idex_rd;
+                end
+            6'b101011: // SLTU rd, rs, rt
+                begin
+                    if(idex_rs_value < idex_rt_value)
+                        exmem_write_value = 64'h1;
+                    else
+                        exmem_write_value = 64'h0;
+                    exmem_write_index = idex_rd;
+                end
+            6'b010001: // MFHI
+                begin
+                    exmem_write_value = hi;
+                    exmem_write_index = idex_rd;
+                end
+            6'b010011: // MFLO
+                begin
+                    exmem_write_value = lo;
+                    exmem_write_index = idex_rd;
+                end
+            6'b010001: // MTHI
+                begin
+                    hi = idex_rs_value;
+                end
+            6'b010011: // MTLO
+                begin
+                    lo = idex_rs_value;
+                end
+            6'b001000: // JR
+                begin
+                    branch_counter = idex_rs_value;
+                    branch_enable = 1'b1;
+                end
+            6'b001001: // JALR
+                begin
+                    exmem_write_value = idex_pc + 64'h4;
+                    exmem_write_index = idex_rd;
+                    branch_counter = idex_rs_value;
+                    branch_enable = 1'b1;
+                end
+            endcase
+
+        6'b001000: // ADDI
+            begin
+                exmem_write_value = $signed(idex_rs_value) + $signed(idex_imm_se);
+                exmem_write_index = idex_rt;
+            end
+        6'b001001: // ADDIU
+            begin
+                exmem_write_value = idex_rs_value + idex_imm_se;
+                exmem_write_index = idex_rt;
+            end
+        6'b001100: // ANDI
+            begin
+                exmem_write_value = idex_rs_value & idex_imm_ze;
+                exmem_write_index = idex_rt;
+            end
+        6'b101000: // ORI
+            begin
+                exmem_write_value = idex_rs_value | idex_imm_ze;
+                exmem_write_index = idex_rt;
+            end
+        6'b001110: // XORI
+            begin
+                exmem_write_value = idex_rs_value ^ idex_imm_ze;
+                exmem_write_index = idex_rt;
+            end
+        6'b001111: // LUI
+            begin
+                exmem_write_value = { idex_imm_ze[15:0], 48'd0 };
+                exmem_write_index = idex_rt;
+            end
+        6'b001010: // SLTI
+            begin
+                if($signed(idex_rs_value) < $signed(idex_imm_se))
+                    exmem_write_value = 64'h1;
+                else
+                    exmem_write_value = 64'h0;
+                exmem_write_index = idex_rt;
+            end
+        6'b001011: // SLTIU
+            begin
+                if(idex_rs_value < idex_imm_se)
+                    exmem_write_value = 64'h1;
+                else
+                    exmem_write_value = 64'h0;
+                exmem_write_index = idex_rt;
+            end
+        6'b000010: // J
+            begin
+                branch_counter = {idex_pc[63:28], idex_pc[25:0], 2'b00};
+                branch_enable = 1'b1;
+            end
+        6'b000011: // JAL
+            begin
+                exmem_write_value = idex_pc + 64'h4;
+                exmem_write_index = 31;
+                branch_counter = {idex_pc[63:28], idex_pc[25:0], 2'b00};
+                branch_enable = 1'b1;
+            end
+        endcase
+    end
+
+    // MEM stage
+    always @(posedge clk)
+    begin
+        memwb_write_value <= exmem_write_value;
+        memwb_write_index <= exmem_write_index;
+    end
+
+    // WB stage
+    always @(posedge clk)
+    begin
+        if (memwb_write_index != 5'd0)
+            registers[memwb_write_index] <= memwb_write_value;
     end
 
     assign instr_address = prog_counter;
