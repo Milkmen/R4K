@@ -97,7 +97,7 @@ module r4k_core
         idex_rt <= ifid_instr[20:16];
         idex_rd <= ifid_instr[15:11];
         idex_funct <= ifid_instr[5:0];
-        idex_imm_se <= { { 48 { ifid_instr[15] } }, ifid_instr[15:0] };
+        idex_imm_se <= { { 48{ ifid_instr[15] } }, ifid_instr[15:0] };
         idex_imm_ze <= { 48'd0, ifid_instr[15:0] };
         idex_rs_value <= registers[ifid_instr[25:21]];
         idex_rt_value <= registers[ifid_instr[20:16]];
@@ -303,14 +303,14 @@ module r4k_core
             end
         6'b000010: // J
             begin
-                branch_counter = {idex_pc[63:28], idex_pc[25:0], 2'b00};
+                branch_counter = { idex_pc[63:28], idex_pc[25:0], 2'b00 };
                 branch_enable = 1'b1;
             end
         6'b000011: // JAL
             begin
                 exmem_write_value = idex_pc + 64'h4;
                 exmem_write_index = 31;
-                branch_counter = {idex_pc[63:28], idex_pc[25:0], 2'b00};
+                branch_counter = { idex_pc[63:28], idex_pc[25:0], 2'b00 };
                 branch_enable = 1'b1;
             end
         6'b100000, // LB
@@ -336,49 +336,121 @@ module r4k_core
                 exmem_mem_format = 2'h3; // 8 bytes
                 exmem_mem_signed = 1'b1;
             end
+        6'b101000, // SB
+            begin
+                exmem_mem_format = 2'h0; // 1 byte
+                exmem_mem_signed = ~opcode[2];
+            end
+        6'b101001, // SH
+            begin
+                exmem_mem_format = 2'h1; // 2 bytes
+                exmem_mem_signed = ~opcode[2];
+            end
+        6'b101011, // SW
+            begin
+                exmem_mem_format = 2'h2; // 4 bytes
+                exmem_mem_signed = ~opcode[2];
+            end
+        6'b111111, // SD
+            begin
+                exmem_mem_format = 2'h3; // 8 bytes
+                exmem_mem_signed = ~opcode[2];
+            end
         endcase
 
         if (opcode[5:3] == 3'b100 || opcode == 6'b110111) 
         begin
-            exmem_mem_addr   = idex_addr;
-            exmem_mem_read   = 1'b1;
-            exmem_write_index = rt;
+            exmem_mem_addr      = idex_addr;
+            exmem_mem_read      = 1'b1;
+            exmem_write_index   = rt;
+        end
+        else if (opcode[5:3] == 3'b101 || opcode == 6'b111111) 
+        begin
+            exmem_mem_addr      = idex_addr;
+            exmem_mem_write     = 1'b1;
+            exmem_write_value = idex_rt_value;
         end
     end
 
     // MEM stage
-    always @(posedge clk)
+    always @(posedge clk) 
     begin
-        if(exmem_mem_read)
-        begin
-            reg [63:0] masked_data;
+        reg [63:0] load_data;
+        reg [63:0] store_data;
+        reg [7:0]  store_mask;
 
+        if (exmem_mem_read) 
+        begin
             case (exmem_mem_format)
-            2'd0: 
-                load_data <= exmem_signed ? 
-                    { { 56 { data_in[7] } }, data_in[7:0] } :
-                    { 56'd0, data_in[7:0] };
-            2'd1: 
-                load_data <= exmem_signed ? 
-                    { { 48 { data_in[15] } }, data_in[15:0] } :
-                    { 48'd0, data_in[15:0] };
-            2'd2: 
-                load_data <= exmem_signed ? 
-                    { { 32 { data_in[31] } }, data_in[31:0] } :
-                    { 32'd0, data_in[31:0] };
-            2'd3: 
-                masked_data = data_in;
+                2'd0: 
+                    load_data <= exmem_mem_signed ?
+                        { {56{data_in[7]}},  data_in[7:0] } :
+                        { 56'd0, data_in[7:0] };
+                2'd1: 
+                    load_data <= exmem_mem_signed ?
+                        { {48{data_in[15]}}, data_in[15:0] } :
+                        { 48'd0, data_in[15:0] };
+                2'd2: 
+                    load_data <= exmem_mem_signed ?
+                        { {32{data_in[31]}}, data_in[31:0] } :
+                        { 32'd0, data_in[31:0] };
+                2'd3: 
+                    load_data <= data_in;
+                default:
+                    load_data <= data_in;
             endcase
 
-            memwb_write_value <= masked_data;
+            memwb_write_value <= load_data;
         end
-        else
+        else 
         begin
             memwb_write_value <= exmem_write_value;
         end
 
         memwb_write_index <= exmem_write_index;
+
+        if (exmem_mem_write) 
+        begin
+            case (exmem_mem_format)
+            2'd0: 
+                begin // SB
+                    store_data <= {56'd0, exmem_write_value[7:0]};
+                    store_mask <= 8'b00000001;
+                end
+            2'd1: 
+                begin // SH
+                    store_data <= {48'd0, exmem_write_value[15:0]};
+                    store_mask <= 8'b00000011;
+                end
+            2'd2: 
+                begin // SW
+                    store_data <= {32'd0, exmem_write_value[31:0]};
+                    store_mask <= 8'b00001111;
+                end
+            2'd3: 
+                begin // SD
+                    store_data <= exmem_write_value;
+                    store_mask <= 8'b11111111;
+                end
+            default: 
+                begin
+                    store_data <= exmem_write_value;
+                    store_mask <= 8'b11111111;
+                end
+            endcase
+
+            data_out   <= store_data;
+            data_mask  <= store_mask;
+            data_write <= 1'b1;
+        end
+        else 
+        begin
+            data_out   <= 64'd0;
+            data_mask  <= 8'd0;
+            data_write <= 1'b0;
+        end
     end
+
 
     // WB stage
     always @(posedge clk)
