@@ -336,22 +336,22 @@ module r4k_core
                 exmem_mem_format = 2'h3; // 8 bytes
                 exmem_mem_signed = 1'b1;
             end
-        6'b101000, // SB
+        6'b101000: // SB
             begin
                 exmem_mem_format = 2'h0; // 1 byte
                 exmem_mem_signed = ~opcode[2];
             end
-        6'b101001, // SH
+        6'b101001: // SH
             begin
                 exmem_mem_format = 2'h1; // 2 bytes
                 exmem_mem_signed = ~opcode[2];
             end
-        6'b101011, // SW
+        6'b101011: // SW
             begin
                 exmem_mem_format = 2'h2; // 4 bytes
                 exmem_mem_signed = ~opcode[2];
             end
-        6'b111111, // SD
+        6'b111111: // SD
             begin
                 exmem_mem_format = 2'h3; // 8 bytes
                 exmem_mem_signed = ~opcode[2];
@@ -378,26 +378,35 @@ module r4k_core
         reg [63:0] load_data;
         reg [63:0] store_data;
         reg [7:0]  store_mask;
+        reg [63:0] shifted;
+        reg [5:0]  shift_bits;
+        reg [2:0]  off;
+        reg [63:0] low_mask;
+
+        off = exmem_mem_addr[2:0];
+        shift_bits = { off, 3'b000 }; // off * 8
+
+        shifted = data_in >> shift_bits;
 
         if (exmem_mem_read) 
         begin
             case (exmem_mem_format)
-                2'd0: 
-                    load_data <= exmem_mem_signed ?
-                        { {56{data_in[7]}},  data_in[7:0] } :
-                        { 56'd0, data_in[7:0] };
-                2'd1: 
-                    load_data <= exmem_mem_signed ?
-                        { {48{data_in[15]}}, data_in[15:0] } :
-                        { 48'd0, data_in[15:0] };
-                2'd2: 
-                    load_data <= exmem_mem_signed ?
-                        { {32{data_in[31]}}, data_in[31:0] } :
-                        { 32'd0, data_in[31:0] };
-                2'd3: 
-                    load_data <= data_in;
-                default:
-                    load_data <= data_in;
+            2'd0: // LB/LBU
+                load_data <= exmem_mem_signed ?
+                    { {56{ shifted[7] }},  shifted[7:0] } :
+                    { 56'd0,                 shifted[7:0] };
+            2'd1: // LH/LHU
+                load_data <= exmem_mem_signed ?
+                    { {48{ shifted[15] }}, shifted[15:0] } :
+                    { 48'd0,                shifted[15:0] };
+            2'd2: // LW/LWU
+                load_data <= exmem_mem_signed ?
+                    { {32{ shifted[31] }}, shifted[31:0] } :
+                    { 32'd0,                shifted[31:0] };
+            2'd3: // LD
+                load_data <= data_in;
+            default:
+                load_data <= data_in;
             endcase
 
             memwb_write_value <= load_data;
@@ -414,28 +423,33 @@ module r4k_core
             case (exmem_mem_format)
             2'd0: 
                 begin // SB
-                    store_data <= {56'd0, exmem_write_value[7:0]};
-                    store_mask <= 8'b00000001;
+                    low_mask   = 64'h00000000000000FF;
+                    store_data <= (exmem_write_value & low_mask) << shift_bits;
+                    store_mask <= 8'h01 << off;
                 end
             2'd1: 
                 begin // SH
-                    store_data <= {48'd0, exmem_write_value[15:0]};
-                    store_mask <= 8'b00000011;
+                    low_mask   = 64'h000000000000FFFF;
+                    store_data <= (exmem_write_value & low_mask) << shift_bits;
+                    store_mask <= 8'h03 << off;
                 end
             2'd2: 
                 begin // SW
-                    store_data <= {32'd0, exmem_write_value[31:0]};
-                    store_mask <= 8'b00001111;
+                    low_mask   = 64'h00000000FFFFFFFF;
+                    store_data <= (exmem_write_value & low_mask) << shift_bits;
+                    store_mask <= 8'h0F << off;
                 end
             2'd3: 
                 begin // SD
+                    low_mask   = 64'hFFFFFFFFFFFFFFFF;
                     store_data <= exmem_write_value;
-                    store_mask <= 8'b11111111;
+                    store_mask <= 8'hFF;
                 end
             default: 
                 begin
+                    low_mask   = 64'hFFFFFFFFFFFFFFFF;
                     store_data <= exmem_write_value;
-                    store_mask <= 8'b11111111;
+                    store_mask <= 8'hFF;
                 end
             endcase
 
@@ -457,6 +471,7 @@ module r4k_core
     begin
         if (memwb_write_index != 5'd0)
             registers[memwb_write_index] <= memwb_write_value;
+        registers[0] <= 64'd0;
     end
 
     assign data_address = exmem_mem_addr;
